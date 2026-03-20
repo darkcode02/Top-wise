@@ -1,5 +1,5 @@
 trigger:
-  - main
+  - main  # ← Cambia por tu rama real (main, master, develop, etc.)
 
 pool:
   vmImage: 'ubuntu-latest'
@@ -14,10 +14,7 @@ stages:
       - job: BuildJob
         displayName: 'Build Job'
         steps:
-          - task: UseNode@1
-            inputs:
-              version: '18.x'
-            displayName: 'Setup Node.js'
+          - checkout: self
 
           - script: |
               echo "Instalando dependencias..."
@@ -34,6 +31,12 @@ stages:
               npm test
             displayName: 'Run Tests'
 
+          - task: CopyFiles@2
+            inputs:
+              contents: '**'
+              targetFolder: '$(Build.ArtifactStagingDirectory)'
+            displayName: 'Copy Files to Staging'
+
           - task: PublishBuildArtifacts@1
             inputs:
               pathToPublish: '$(Build.ArtifactStagingDirectory)'
@@ -45,13 +48,14 @@ stages:
     dependsOn: Build
     condition: succeeded()
     jobs:
-      - deployment: DeployJob
+      - job: DeployJob          # ← "job" en vez de "deployment" (no requiere environment)
         displayName: 'Deploy Job'
-        environment: 'production'
-        strategy:
-          runOnce:
-            deploy:
-              steps:
-                - script: |
-                    echo "Desplegando aplicación..."
-                  displayName: 'Deploy Application'
+        steps:
+          - download: current
+            artifact: drop
+            displayName: 'Download Artifacts'
+
+          - script: |
+              echo "Desplegando aplicación..."
+              echo "Artefactos en: $(Pipeline.Workspace)/drop"
+            displayName: 'Deploy Application'
