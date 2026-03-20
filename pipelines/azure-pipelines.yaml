@@ -1,61 +1,22 @@
 trigger:
-  - main  # ← Cambia por tu rama real (main, master, develop, etc.)
+  - main
 
 pool:
   vmImage: 'ubuntu-latest'
 
-variables:
-  buildConfiguration: 'Release'
+steps:
+  - task: UsePythonVersion@0
+    inputs:
+      versionSpec: '3.11'
+    displayName: 'Instalar Python 3.11'
 
-stages:
-  - stage: Build
-    displayName: 'Build'
-    jobs:
-      - job: BuildJob
-        displayName: 'Build Job'
-        steps:
-          - checkout: self
+  - task: UseNode@1
+    inputs:
+      version: '18.x'
+    displayName: 'Instalar Node.js 18'
 
-          - script: |
-              echo "Instalando dependencias..."
-              npm install
-            displayName: 'Install Dependencies'
-
-          - script: |
-              echo "Compilando proyecto..."
-              npm run build
-            displayName: 'Build Project'
-
-          - script: |
-              echo "Ejecutando pruebas..."
-              npm test
-            displayName: 'Run Tests'
-
-          - task: CopyFiles@2
-            inputs:
-              contents: '**'
-              targetFolder: '$(Build.ArtifactStagingDirectory)'
-            displayName: 'Copy Files to Staging'
-
-          - task: PublishBuildArtifacts@1
-            inputs:
-              pathToPublish: '$(Build.ArtifactStagingDirectory)'
-              artifactName: 'drop'
-            displayName: 'Publish Artifacts'
-
-  - stage: Deploy
-    displayName: 'Deploy'
-    dependsOn: Build
-    condition: succeeded()
-    jobs:
-      - job: DeployJob          # ← "job" en vez de "deployment" (no requiere environment)
-        displayName: 'Deploy Job'
-        steps:
-          - download: current
-            artifact: drop
-            displayName: 'Download Artifacts'
-
-          - script: |
-              echo "Desplegando aplicación..."
-              echo "Artefactos en: $(Pipeline.Workspace)/drop"
-            displayName: 'Deploy Application'
+  - script: |
+      python --version
+      node --version
+      npm --version
+    displayName: 'Verificar versiones'
