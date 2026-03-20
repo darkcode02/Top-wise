@@ -16,7 +16,3 @@ steps:
     displayName: 'Instalar Node.js 18'
 
   - script: |
-      python --version
-      node --version
-      npm --version
-    displayName: 'Verificar versiones'
