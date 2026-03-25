@@ -4,7 +4,7 @@ trigger:
 
 pool:
   vmImage: 'ubuntu-latest'
-
+#frf
 variables:
   pythonVersion: '3.11'
   dockerImageName: 'task-manager'
