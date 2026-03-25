@@ -8,7 +8,7 @@ pool:
 variables:
   pythonVersion: '3.11'
   dockerImageName: 'task-manager'
-  dockerRegistryServiceConnection: 'YourDockerRegistry' # Configura esto en Azure DevOps
+  dockerRegistryServiceConnection: 'docker-SC' # Configura esto en Azure DevOps
 
 stages:
   - stage: Build
