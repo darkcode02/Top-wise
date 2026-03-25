@@ -1,0 +1,14 @@
+services:
+  task-manager:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: task-manager-app
+    ports:
+      - "5000:5000"
+    environment:
+      - FLASK_ENV=production
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ./task_manager:/app
+    restart: unless-stopped

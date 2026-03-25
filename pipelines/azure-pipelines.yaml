@@ -1,22 +1,116 @@
 trigger:
   - main
+  - develop
 
 pool:
   vmImage: 'ubuntu-latest'
 
-steps:
-  - task: UsePythonVersion@0
-    inputs:
-      versionSpec: '3.11'
-    displayName: 'Instalar Python 3.11'
+variables:
+  pythonVersion: '3.11'
+  dockerImageName: 'task-manager'
+  dockerRegistryServiceConnection: 'YourDockerRegistry' # Configura esto en Azure DevOps
 
-  - task: UseNode@1
-    inputs:
-      version: '18.x'
-    displayName: 'Instalar Node.js 18'
+stages:
+  - stage: Build
+    displayName: 'Build y Test'
+    jobs:
+      - job: TestJob
+        displayName: 'Ejecutar Tests'
+        steps:
+          - task: UsePythonVersion@0
+            inputs:
+              versionSpec: '$(pythonVersion)'
+            displayName: 'Instalar Python $(pythonVersion)'
 
-  - script: |
-      python --version
-      node --version
-      npm --version
-    displayName: 'Verificar versiones'
+          - script: |
+              python -m pip install --upgrade pip
+              pip install -r task_manager/requirements.txt
+              pip install pytest pytest-cov
+            displayName: 'Instalar dependencias'
+
+          - script: |
+              python -m pytest task_manager/tests/ -v --junitxml=junit/test-results.xml --cov=task_manager --cov-report=xml --cov-report=html
+            displayName: 'Ejecutar tests con cobertura'
+
+          - task: PublishTestResults@2
+            condition: succeededOrFailed()
+            inputs:
+              testResultsFiles: '**/test-*.xml'
+              testRunTitle: 'Python Tests'
+            displayName: 'Publicar resultados de tests'
+
+          - task: PublishCodeCoverageResults@1
+            inputs:
+              codeCoverageTool: Cobertura
+              summaryFileLocation: '$(System.DefaultWorkingDirectory)/**/coverage.xml'
+            displayName: 'Publicar cobertura de código'
+
+  - stage: Security
+    displayName: 'Análisis de Seguridad y Calidad'
+    dependsOn: Build
+    condition: succeeded()
+    jobs:
+      - job: LintJob
+        displayName: 'Análisis de código'
+        steps:
+          - task: UsePythonVersion@0
+            inputs:
+              versionSpec: '$(pythonVersion)'
+            displayName: 'Instalar Python $(pythonVersion)'
+
+          - script: |
+              python -m pip install --upgrade pip
+              pip install pylint flake8 black
+            displayName: 'Instalar herramientas de análisis'
+
+          - script: |
+              flake8 task_manager --count --select=E9,F63,F7,F82 --show-source --statistics || true
+              flake8 task_manager --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics || true
+            displayName: 'Ejecutar flake8'
+
+          - script: |
+              black --check task_manager || true
+            displayName: 'Verificar formato con black'
+
+  - stage: Docker
+    displayName: 'Build y Push Docker'
+    dependsOn: Security
+    condition: succeeded()
+    jobs:
+      - job: DockerJob
+        displayName: 'Construir y pushear imagen Docker'
+        steps:
+          - task: Docker@2
+            condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+            inputs:
+              command: 'buildAndPush'
+              repository: '$(dockerImageName)'
+              dockerfile: '$(Build.SourcesDirectory)/Dockerfile'
+              containerRegistry: '$(dockerRegistryServiceConnection)'
+              tags: |
+                latest
+                $(Build.BuildId)
+            displayName: 'Build y Push a Docker Registry (main)'
+
+          - task: Docker@2
+            condition: and(succeeded(), ne(variables['Build.SourceBranch'], 'refs/heads/main'))
+            inputs:
+              command: 'build'
+              dockerfile: '$(Build.SourcesDirectory)/Dockerfile'
+              tags: '$(dockerImageName):$(Build.BuildId)-dev'
+            displayName: 'Build Docker image (develop)'
+
+  - stage: Report
+    displayName: 'Reporte Final'
+    dependsOn: Docker
+    condition: always()
+    jobs:
+      - job: ReportJob
+        displayName: 'Generar reporte'
+        steps:
+          - script: |
+              echo "##[section]Pipeline completado"
+              echo "Rama: $(Build.SourceBranch)"
+              echo "Commit: $(Build.SourceVersion)"
+              echo "Timestamp: $(System.JobDisplayName)"
+            displayName: 'Información del Pipeline'
