@@ -5,9 +5,9 @@ trigger:
 pool:
   vmImage: 'ubuntu-latest'
 variables:
-  pythonVersion: '$(pythonVersion)'
-  dockerImageName: '$(dockerImageName)'
-  dockerRegistryServiceConnection: '$(dockerRegistryServiceConnection)' # Configura esto en Azure DevOps
+  pythonVersion: '3.11'
+  dockerImageName: 'task-manager'
+  dockerRegistryServiceConnection: 'docker-SC'# Configura esto en Azure DevOps
 #frf
 stages:
   - stage: Build
