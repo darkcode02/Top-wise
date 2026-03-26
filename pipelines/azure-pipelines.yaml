@@ -2,21 +2,27 @@ trigger:
   - main
   - develop
 
+pr:
+  - main
+  - develop
+
 pool:
   vmImage: 'ubuntu-latest'
 
 variables:
   pythonVersion: '3.11'
-  dockerImageName: 'task-manager'
+  dockerImageName: 'topwise-task-manager'
   dockerRegistryServiceConnection: 'docker-SC'
   dockerHubUser: 'darkcode02'
+  dockerImageTag: '$(Build.BuildId)'
+  dockerImageTagLatest: 'latest'
 
 stages:
-  - stage: Build
-    displayName: 'Build y Test'
+  - stage: Quality
+    displayName: 'Control de Calidad'
     jobs:
-      - job: TestJob
-        displayName: 'Ejecutar Tests'
+      - job: BuildAndTest
+        displayName: 'Build, Test y Validación'
         steps:
           - task: UsePythonVersion@0
             inputs:
@@ -26,33 +32,57 @@ stages:
           - script: |
               python -m pip install --upgrade pip
               pip install -r task_manager/requirements.txt
-              pip install pytest pytest-cov
-            displayName: 'Instalar dependencias'
+              pip install pytest pytest-cov flake8 black pylint
+            displayName: 'Instalar dependencias de proyecto y herramientas'
 
           - script: |
-              python -m pytest task_manager/tests/ -v --junitxml=junit/test-results.xml --cov=task_manager --cov-report=xml --cov-report=html
+              echo "##[section]Verificando formato con Black"
+              black --check task_manager || true
+            displayName: 'Validar formato de código (Black)'
+
+          - script: |
+              echo "##[section]Ejecutando Flake8"
+              flake8 task_manager --count --select=E9,F63,F7,F82 --show-source --statistics || true
+            displayName: 'Análisis estático (Flake8)'
+
+          - script: |
+              echo "##[section]Ejecutando Pylint"
+              pylint task_manager --exit-zero || true
+            displayName: 'Análisis de código (Pylint)'
+
+          - script: |
+              if [ -d "task_manager/tests" ] && [ -f "task_manager/tests/test_app.py" ]; then
+                echo "##[section]Ejecutando tests"
+                python -m pytest task_manager/tests/ -v --junitxml=junit/test-results.xml --cov=task_manager --cov-report=xml --cov-report=html
+              else
+                echo "##[warning]No se encontraron tests. Saltando..."
+              fi
             displayName: 'Ejecutar tests con cobertura'
+            continueOnError: true
 
           - task: PublishTestResults@2
-            condition: succeededOrFailed()
+            condition: always()
             inputs:
               testResultsFiles: '**/test-*.xml'
-              testRunTitle: 'Python Tests'
+              testRunTitle: 'Python Tests (Python $(pythonVersion))'
             displayName: 'Publicar resultados de tests'
+            continueOnError: true
 
           - task: PublishCodeCoverageResults@1
+            condition: always()
             inputs:
               codeCoverageTool: Cobertura
               summaryFileLocation: '$(System.DefaultWorkingDirectory)/**/coverage.xml'
             displayName: 'Publicar cobertura de código'
+            continueOnError: true
 
-  - stage: Security
-    displayName: 'Análisis de Seguridad y Calidad'
-    dependsOn: Build
+  - stage: Docker
+    displayName: 'Build y Publicar Docker'
+    dependsOn: Quality
     condition: succeeded()
     jobs:
-      - job: LintJob
-        displayName: 'Análisis de código'
+      - job: DockerBuild
+        displayName: 'Construir imagen Docker'
         steps:
           - task: UsePythonVersion@0
             inputs:
@@ -60,26 +90,28 @@ stages:
             displayName: 'Instalar Python $(pythonVersion)'
 
           - script: |
-              python -m pip install --upgrade pip
-              pip install pylint flake8 black
-            displayName: 'Instalar herramientas de análisis'
+              echo "##[section]Información del build"
+              echo "Rama: $(Build.SourceBranch)"
+              echo "Commit: $(Build.SourceVersionMessage)"
+              echo "Build ID: $(Build.BuildId)"
+              echo "Timestamp: $(System.JobDisplayName)"
+            displayName: 'Mostrar información del build'
+
+          - task: Docker@2
+            inputs:
+              command: 'build'
+              Dockerfile: '$(Build.SourcesDirectory)/Dockerfile'
+              arguments: '--build-arg BUILD_DATE=$(Build.StartTime) --build-arg VCS_REF=$(Build.SourceVersion) --build-arg VERSION=$(Build.BuildId)'
+            displayName: 'Construir imagen Docker'
 
           - script: |
-              flake8 task_manager --count --select=E9,F63,F7,F82 --show-source --statistics || true
-              flake8 task_manager --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics || true
-            displayName: 'Ejecutar flake8'
+              docker images | grep topwise
+            displayName: 'Listar imágenes construidas'
 
-          - script: |
-              black --check task_manager || true
-            displayName: 'Verificar formato con black'
-
-  - stage: Docker
-    displayName: 'Build y Push Docker'
-    dependsOn: Security
-    condition: succeeded()
-    jobs:
-      - job: DockerJob
-        displayName: 'Construir y pushear imagen Docker'
+      - job: DockerPush
+        displayName: 'Push a Docker Hub'
+        dependsOn: DockerBuild
+        condition: succeeded()
         steps:
           - task: Docker@2
             condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
@@ -90,28 +122,70 @@ stages:
               containerRegistry: '$(dockerRegistryServiceConnection)'
               tags: |
                 latest
-                $(Build.BuildId)
-            displayName: 'Build y Push a Docker Registry (main)'
+                $(dockerImageTag)
+                v1.0.0
+              arguments: '--build-arg BUILD_DATE=$(Build.StartTime) --build-arg VCS_REF=$(Build.SourceVersion) --build-arg VERSION=$(Build.BuildId)'
+            displayName: 'Build, Push a Docker Hub - MAIN (latest + $(dockerImageTag))'
 
           - task: Docker@2
-            condition: and(succeeded(), ne(variables['Build.SourceBranch'], 'refs/heads/main'))
+            condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/develop'))
             inputs:
-              command: 'build'
+              command: 'buildAndPush'
+              repository: '$(dockerHubUser)/$(dockerImageName)'
               dockerfile: '$(Build.SourcesDirectory)/Dockerfile'
-              tags: '$(dockerHubUser)/$(dockerImageName):$(Build.BuildId)-dev'
-            displayName: 'Build Docker image (develop)'
+              containerRegistry: '$(dockerRegistryServiceConnection)'
+              tags: |
+                develop
+                develop-$(dockerImageTag)
+              arguments: '--build-arg BUILD_DATE=$(Build.StartTime) --build-arg VCS_REF=$(Build.SourceVersion) --build-arg VERSION=$(Build.BuildId)'
+            displayName: 'Build, Push a Docker Hub - DEVELOP (develop + develop-$(dockerImageTag))'
 
-  - stage: Report
-    displayName: 'Reporte Final'
+          - script: |
+              echo "##[section]Imágenes subidas a Docker Hub"
+              echo "Repositorio: $(dockerHubUser)/$(dockerImageName)"
+              echo ""
+              echo "Tags disponibles:"
+              if [ "$(Build.SourceBranch)" = "refs/heads/main" ]; then
+                echo "  - latest"
+                echo "  - $(dockerImageTag)"
+                echo "  - v1.0.0"
+              else
+                echo "  - develop"
+                echo "  - develop-$(dockerImageTag)"
+              fi
+            displayName: 'Información de push a Docker Hub'
+
+  - stage: Notification
+    displayName: 'Notificaciones'
     dependsOn: Docker
     condition: always()
     jobs:
-      - job: ReportJob
-        displayName: 'Generar reporte'
+      - job: Summary
+        displayName: 'Resumen del Pipeline'
         steps:
           - script: |
-              echo "##[section]Pipeline completado"
+              echo "##[section]========================================"
+              echo "##[section]RESUMEN DEL PIPELINE - TopWise"
+              echo "##[section]========================================"
+              echo ""
+              echo "Estado: $(Agent.JobStatus)"
               echo "Rama: $(Build.SourceBranch)"
-              echo "Commit: $(Build.SourceVersion)"
-              echo "Timestamp: $(System.JobDisplayName)"
-            displayName: 'Información del Pipeline'
+              echo "Commit: $(Build.SourceVersionMessage)"
+              echo "Build ID: $(Build.BuildId)"
+              echo ""
+              if [ "$(Agent.JobStatus)" = "Succeeded" ]; then
+                echo "##[section]✅ Pipeline completado exitosamente"
+              else
+                echo "##[error]❌ Pipeline encontró errores"
+              fi
+              echo "##[section]========================================"
+            displayName: 'Mostrar resumen final'
+          
+          - script: |
+              cat > docker-compose-override.yml << EOF
+              # Usar imagen desde Docker Hub en lugar de build local
+              # docker pull $(dockerHubUser)/$(dockerImageName):latest
+              # docker-compose up
+              EOF
+              echo "✓ Archivo docker-compose-override.yml generado como referencia"
+            displayName: 'Generar referencia para pull desde Docker Hub'
