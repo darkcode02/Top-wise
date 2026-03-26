@@ -4,11 +4,13 @@ trigger:
 
 pool:
   vmImage: 'ubuntu-latest'
+
 variables:
   pythonVersion: '3.11'
   dockerImageName: 'task-manager'
-  dockerRegistryServiceConnection: 'docker-SC'# Configura esto en Azure DevOps
-#frf
+  dockerRegistryServiceConnection: 'docker-SC'
+  dockerHubUser: 'darkcode02'
+
 stages:
   - stage: Build
     displayName: 'Build y Test'
@@ -83,7 +85,7 @@ stages:
             condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
             inputs:
               command: 'buildAndPush'
-              repository: '$(dockerImageName)'
+              repository: '$(dockerHubUser)/$(dockerImageName)'
               dockerfile: '$(Build.SourcesDirectory)/Dockerfile'
               containerRegistry: '$(dockerRegistryServiceConnection)'
               tags: |
@@ -96,7 +98,7 @@ stages:
             inputs:
               command: 'build'
               dockerfile: '$(Build.SourcesDirectory)/Dockerfile'
-              tags: '$(dockerImageName):$(Build.BuildId)-dev'
+              tags: '$(dockerHubUser)/$(dockerImageName):$(Build.BuildId)-dev'
             displayName: 'Build Docker image (develop)'
 
   - stage: Report
