@@ -115,7 +115,7 @@ stages:
                 echo "##[warning]Docker CLI no disponible en este contexto"
               fi
             displayName: 'Validar imagen construida'
-            continueOnError: true
+            continueOnError: false
 
       - job: DockerPush
         displayName: 'Push a Docker Hub'
